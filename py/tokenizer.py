@@ -275,6 +275,7 @@ def tokenizer_one(data):
 		'*': 'is_mul',
 		'+': 'is_add',
 		'/': 'is_div',
+		'-': 'is_sub',
 		'.': 'is_dot',
 		'=': 'is_equal',
 		'{': 'is_curly_open',
@@ -364,6 +365,15 @@ def tokenizer_two(tokens):
 				out.append(ntok)
 			else:
 				error_token(tokens[x], 'Expected import name but got %s' % tokens.peek_one())
+		elif tok.is_name == 'return':
+			exp = []
+			while not tokens.peek_one().is_semi_colon:
+				exp.append(tokens.one())
+			tokens.one()
+
+			out.append(tok.new('is_stmt_return', {
+				'body': exp,
+			}))
 		elif tok.is_name == 'scope':
 			if tokens.peek_one().is_name:
 				out.append(tok.new('is_stmt_scope', tokenizer_read_scope_name(tokens)))
@@ -386,11 +396,13 @@ def tokenizer_two(tokens):
 				error_token(tok, 'Expected parathesis after function name.')
 			args = []
 			while tokens.has_more and not tokens.peek_one().is_para_close:
+				if len(args) < 1:
+					args.append([])
 				if tokens.peek_one().is_comma:
+					tokens.one()
 					args.append([])
-				if len(args) < 0:
-					args.append([])
-				args[-1].append(token.one())
+					continue
+				args[-1].append(tokens.one())
 			if not tokens.one().is_para_close:
 				error_token(nme, 'Expected closing parathesis after function name.')
 			out.append(tok.new('is_stmt_fn', {
@@ -599,7 +611,48 @@ def tokenize_body(body):
 			})
 
 			out.append(ntok)
+		elif tok.is_para_open and tokens.has_more() and tokens.peek_one().is_name:
+			# This is likely a tuple which will preceed an assignment expression.
+
+			# Look for ending parathesis while grouping outputs.
+			args = []
+			while not tokens.peek_one().is_para_close:
+				if len(args) < 1:
+					args.append([])
+				tmp = tokens.one()
+
+				if tmp.is_comma:
+					args.append([])
+					continue
+
+				args[-1].append(tmp)
+
+			# Eat that last parathesis.
+			tokens.one()
+
+			# Ensure assignment operator is next.
+			if not tokens.one().is_equal:
+				error_token(tok, 'Expected assignment operator after tuple variable group.')
+
+			assign_to = args
+
+			expression = []
+
+			while not tokens.peek_one().is_semi_colon:
+				expression.append(tokens.one())
+			tokens.one()
+
+			ntok = tok.new('is_stmt_assignment', True)
+			ntok.body = tokenize_expression(expression)
+			ntok.dst = assign_to
+			out.append(ntok)
+		elif tok.is_stmt_return:
+			tok.body = tokenize_expression(tok.body)
+			out.append(tok)
 		elif tok.is_name and tokens.has_more() and tokens.peek_one().is_para_open:
+			# This is for catching simple method/function calls with no
+			# assignment; however, it is treated like an assignment with
+			# the output set to nothing.
 			exp = [tok]
 			while not tokens.peek_one().is_semi_colon:
 				exp.append(tokens.one())

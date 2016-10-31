@@ -46,6 +46,28 @@ def load_iden(iden, out):
 	# by `apple.grape.peach`.
 	return
 
+def store_to_something(something, out):
+	"""
+	Store one or more values onto the stack into locals.
+
+	This is a helper primarily for handling cases where:
+
+	(1) output is a single variable
+	(2) output is from a tuple type to multiple variables
+	(3) output form is not recognized
+	"""
+
+	if type(something) is list:
+		out.append(('tuple.unpack', len(something)))
+		for o in something:
+			if len(o) != 1 or o[0]['xtype'] != 'is_name':
+				raise Exception('Expected a identifier for tuple output element.')
+			out.append(('store.local', o[0]['value']))
+	elif type(something) is str:
+		out.append(('store.local', something))
+	else:
+		raise Exception('Not able to handle assignment to something not tuple like or single variable.')
+
 def translate_seq(seq):
 	body = Reader(seq)
 
@@ -72,7 +94,7 @@ def translate_seq(seq):
 			out.append(something)
 		else:
 			# Unknown
-			raise Exception('Compiler problem handling first item of AST assignment as %s' % first)
+			raise Exception('Compiler problem handling first item of AST assignment as %s' % something)
 
 	first = body.one()
 	load_something(first)
@@ -180,12 +202,16 @@ def translate(ast):
 			for x in range(0, len(args)):
 				args[x] = translate_seq(args[x])
 
+		if type(item) is dict and item['xtype'] == 'is_stmt_return':
+			print('body', item['body'])
+			item['body'] = translate_seq(item['body'])			
+
 		if type(item) is dict and item['xtype'] == 'is_stmt_assignment':
 			item['body'] = translate_seq(item['body'])
 			# Now that the byte-code to calculate the expression has
 			# been generated the output needs to be stored if specified.
 			if 'dst' in item and item['dst'] is not None:
-				item['body'].append(('store.local', item['dst']))
+				store_to_something(item['dst'], item['body'])
 			else:
 				# If not stored then it shall simply be poped from the
 				# stack. This is done because the calculation of the
@@ -268,11 +294,19 @@ def translate(ast):
 			# (3) It may reference a local method. (direct)
 			#       Direct: static reference
 			#
+			# The process which translate the byte-code into
+			# native code will handle this determination, or
+			# the interpreter will handle it during execution.
+			#
 			ref = '.'.join(item['name_parts'])
-			out.append(('invoke', ref))
+			out.append(('invoke', ref, len(item['args'])))
 		elif item['xtype'] == 'is_stmt_dec':
 			# TODO: implement this
 			pass
+		elif item['xtype'] == 'is_stmt_return':
+			for sitem in item['body']:
+				handler_phase_two_collapse(sitem, out)
+			out.append(('return',))
 		else:
 			raise Exception('[bug] If type is not tuple, then it should have been something collapsed. The type was %s:\n%s' % (item['xtype'], item))
 
@@ -287,8 +321,6 @@ def translate(ast):
 
 			for x in range(0, len(body)):
 				handler_phase_two_collapse(body[x], out)
-
-			out.append(('return',))
 
 			item['body'] = out
 
