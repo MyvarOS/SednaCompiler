@@ -1,14 +1,12 @@
 ﻿using System;
-using System.Collections.Generic;
 
-namespace Sedna.Core
+namespace Sedna
 {
     public class Program
     {
         public static void Main(string[] args)
         {
-            var c =  new Compiler();
-            c.Compile(new List<string>() { args[1] }, args[0], "" );
+            Console.WriteLine("Hello World!");
         }
     }
 }
