@@ -1,0 +1,19 @@
+/#
+    Please note that this is a draft, for testing the compiler,
+    It will be changed to be functional and usible at the end of the day
+    -Myvar
+#/
+
+Scope Core
+
+type Object
+{
+
+    #all objects must have a ToString Cast    
+    @public
+    @virtual
+    fn ToString() : str
+    {
+        return "Core.Object()";
+    }
+}
