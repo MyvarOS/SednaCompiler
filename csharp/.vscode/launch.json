@@ -9,7 +9,7 @@
             "program": "${workspaceRoot}/bin/Debug/netcoreapp1.0/csharp.dll",
             "args": [],
             "cwd": "${workspaceRoot}",
-            "externalConsole": false,
+            "externalConsole": true,
             "stopAtEntry": false,
             "internalConsoleOptions": "openOnSessionStart"
         },

@@ -6,7 +6,14 @@ namespace Sedna
     {
         public static void Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
+            Errors.Add(new Error(){Code = "E0001" ,EClass = ErrorLevel.Warning, Message = "This is a warning", Pos = 1, Line = 10} );
+            
+            if(Errors.HasErrors())
+            {
+                Errors.Print();
+                Console.ReadKey();
+            }
+            
         }
     }
 }
