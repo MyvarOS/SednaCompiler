@@ -130,6 +130,14 @@ class Reader:
 	def __init__(self, data):
 		self.data = data
 		self.pos = 0
+		self.line = 1
+		self.lpos = 0
+
+	def get_line_num(self):
+		return self.line
+
+	def get_line_pos(self):
+		return self.lpos
 
 	def one(self):
 		"""
@@ -137,6 +145,13 @@ class Reader:
 		"""
 		tmp = self.data[self.pos]
 		self.pos += 1
+
+		if tmp == '\n' or tmp == '\r':
+			self.line += 1
+			self.lpos = 0
+		else:
+			self.lpos += 1
+
 		return tmp
 
 	def peek_one(self):
@@ -151,12 +166,16 @@ class Reader:
 		"""
 		return self.data[self.pos + 1]
 
-	def has_more(self):
+	def has_more(self, no_more_handler=None):
 		"""
 			Returns `True` if more items can be read.
 		"""
 		if self.pos < len(self.data):
 			return True
+
+		if no_more_handler is not None:
+			no_more_handler()
+
 		return False
 
 def tokenizer_read_string(data):
@@ -197,17 +216,22 @@ def tokenizer_read_number(data):
 
 	f = data.one()
 	if f == '0':
-		t = data.one()
+		t = data.peek_one()
 		if t == 'x':
 			xallow = xallow + ['a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F']
+			data.one()
 		elif t == 'b':
 			xallow = ['0', '1']
+			data.one()
 		elif t.isdecimal():
 			# allow float
 			xallow.append('.')
 			whole.append(f)
+			data.one()
 		else:
-			raise Exception('Invalid character in number. Expected "x" for hex or "b" for binary or decimal for decimal.')
+			#print('whole', whole, f)
+			#raise Exception('Invalid character in number. Expected "x" for hex or "b" for binary or decimal for decimal. line: %s pos: %s' % (data.line, data.pos))
+			whole.append(f)
 	else:
 		whole.append(f)
 
@@ -247,16 +271,26 @@ def tokenizer_read_block_comment(data):
 		Read a comment started with `/*` and terminated with
 		`*/`.
 	"""
-	while data.one() != '*' and data.peek_one() != '/':
-		pass
+	out = []
+
+	while not (data.peek_one() == '#' and data.peek_next() == '/'):
+		out.append(data.one())
+
+	data.one()
+	data.one()
+
+	return ''.join(out)
 
 def tokenizer_read_line_comment(data):
 	"""
 		Read a single line comment started by `//`.
 	"""
-	while data.peek_one() != '\n' or data.peek_one() != '\r':
-		pass
+	out = []
+	while data.peek_one() != '\n' and data.peek_one() != '\r':
+		out.append(data.one())
 	data.one()
+
+	return ''.join(out)
 
 def tokenizer_one(data):
 	"""
@@ -294,6 +328,7 @@ def tokenizer_one(data):
 		':': 'is_colon',
 		',': 'is_comma',
 		'@': 'is_atsym',
+		'!': 'is_negate',
 	}
 
 	tokens = []
@@ -303,57 +338,52 @@ def tokenizer_one(data):
 
 	while data.has_more():
 		c = data.peek_one()
+
 		if c == ' ':
 			data.one()
 		elif c == '\t':
 			data.one()
 		elif c == '"':
-			tokens.append(Token('is_string', tokenizer_read_string(data), line_num, line_pos))
+			tokens.append(Token('is_string', tokenizer_read_string(data), data.get_line_num(), data.get_line_pos()))
 		elif c == '\'':
-			tokens.append(Token('is_char', tokenizer_read_char(data), line_num, line_pos))
+			tokens.append(Token('is_char', tokenizer_read_char(data), data.get_line_num(), data.get_line_pos()))
 		elif c.isdecimal():
-			tokens.append(Token('is_number', tokenizer_read_number(data), line_num, line_pos))
+			tokens.append(Token('is_number', tokenizer_read_number(data), data.get_line_num(), data.get_line_pos()))
+		elif c == '#':
+			tokenizer_read_line_comment(data)		
 		elif c.isalpha():
-			tokens.append(Token('is_name', tokenizer_read_name(data), line_num, line_pos))
+			tokens.append(Token('is_name', tokenizer_read_name(data), data.get_line_num(), data.get_line_pos()))
 		elif c == '/':
-			if data.peek_next() == '*':
-				tokenizer_read_block_comment(data)
+			if data.peek_next() == '#':
+				txt = tokenizer_read_block_comment(data)
+				ntok = Token('is_comment', txt, data.get_line_num(), data.get_line_pos())
+				tokens.append(ntok)
 			elif data.peek_next() == '/':
-				tokenizer_read_line_comment(data)
+				txt = tokenizer_read_line_comment(data)
+				ntok = Token('is_comment', txt, data.get_line_num(), data.get_line_pos())
+				tokens.append(ntok)
 			else:
 				data.one()
-				tokens.append(Token(scmap[c], True, line_num, line_pos))
+				tokens.append(Token(scmap[c], True, data.get_line_num(), data.get_line_pos()))
 		elif c in scmap:
 			data.one()
-			tokens.append(Token(scmap[c], True, line_num, line_pos))
+			tokens.append(Token(scmap[c], True, data.get_line_num(), data.get_line_pos()))
 		elif c == '\n' or c == '\r':
 			data.one()
 			line_num += 1
 			line_pos = 0
 		else:
-			raise Exception('Unrecognized character "%s" at line %s position %s' % (c, line_num, line_pos))
+			raise Exception('Unrecognized character "%s" at line %s position %s' % (c, data.get_line_num(), data.get_line_pos()))
+
 		line_pos += 1
 
 	return tokens
 
-def tokenizer_read_scope_name(tokens):
-	parts = []
-
-	while True:
-		if tokens.peek_one().is_name:
-			parts.append(tokens.one().is_name)
-		elif tokens.peek_one().is_dot:
-			pass
-		else:
-			break
-
-	return '.'.join(parts)
-
 def error_token(token, msg):
 	raise Exception('Line %s Pos %s: %s' % (token.line_num, token.line_pos, msg))
 
-def tokenizer_two(tokens):
-	tokens = Reader(tokens)
+def tokenizer_two(in_tokens):
+	tokens = Reader(in_tokens)
 	out = []
 
 	while tokens.has_more():
@@ -374,9 +404,21 @@ def tokenizer_two(tokens):
 			out.append(tok.new('is_stmt_return', {
 				'body': exp,
 			}))
+		elif tok.is_name == 'throw':
+			exp = []
+			while not tokens.peek_one().is_semi_colon:
+				exp.append(tokens.one())
+			tokens.one()
+			ntok = tok.new('is_stmt_throw', {
+				'exp': exp,
+			})
+			out.append(ntok)
 		elif tok.is_name == 'scope':
 			if tokens.peek_one().is_name:
-				out.append(tok.new('is_stmt_scope', tokenizer_read_scope_name(tokens)))
+				out.append(tok.new('is_stmt_scope', tokens.one().is_name))
+				tmp = tokens.one()
+				if not tmp.is_semi_colon:
+					error_token(tmp, 'Expected semi-colon after scope keyword and identifier.')
 			else:
 				error_token(tokens[x], 'Expected scope name but got %s' % tokens.peek_one())				
 		elif tok.is_atsym:
@@ -392,8 +434,9 @@ def tokenizer_two(tokens):
 			nme = tokens.one()
 			if not nme.is_name:
 				error_token(tok, 'Expected function name but got %s' % nme)
-			if not tokens.one().is_para_open:
-				error_token(tok, 'Expected parathesis after function name.')
+			tmp = tokens.one()
+			if not tmp.is_para_open:
+				error_token(tok, 'Expected parathesis after function name but got %s' % tmp)
 			args = []
 			while tokens.has_more and not tokens.peek_one().is_para_close:
 				if len(args) < 1:
@@ -403,11 +446,20 @@ def tokenizer_two(tokens):
 					args.append([])
 					continue
 				args[-1].append(tokens.one())
+			
 			if not tokens.one().is_para_close:
 				error_token(nme, 'Expected closing parathesis after function name.')
+
+			if not tokens.peek_one().is_curly_open:
+				# There is a return type specified.
+				rtype = []
+				while not tokens.peek_one().is_curly_open:
+					rtype.append(tokens.one())
+
 			out.append(tok.new('is_stmt_fn', {
 				'name':     nme.is_name,
 				'args':     args,
+				'rtype':    rtype,
 			}))
 		else:
 			out.append(tok)
@@ -462,6 +514,22 @@ def tokenizer_three(tokens):
 
 	return out
 
+def read_nested_tokens(tokens, st, en):
+	depth = 1
+
+	out = []
+
+	while True:
+		tmp = tokens.one()
+		if getattr(tmp, st, False):
+			depth += 1
+		if getattr(tmp, en, False):
+			depth -= 1
+			if depth == 0:
+				break
+		out.append(tmp)
+	return out
+
 def tokenize_expression(exp):
 	tokens = Reader(exp)
 
@@ -509,17 +577,68 @@ def tokenize_expression(exp):
 
 			ntok.args = args
 			out.append(ntok)
+		elif tok.is_sq_open:
+			'''
+				This is also done in tokenize_body, but then again
+				here because that will actually call this (tokenize_expression)
+				and it needs to catch indexes inside of indexes.
+			'''
+			subexp = read_nested_tokens(tokens, 'is_sq_open', 'is_sq_close')
+
+			ntok = tok.new('is_index', {
+				'exp': tokenize_expression(subexp),
+			})
+			out.append(ntok)					
+		elif tok.is_bit_xor:
+			if tokens.peek_one().is_bit_xor:
+				tokens.one()
+				out.append(tok.new('is_log_xor', True))
+			else:
+				out.append(tok)			
+		elif tok.is_bit_and:
+			if tokens.peek_one().is_bit_and:
+				tokens.one()
+				out.append(tok.new('is_log_and', True))
+			else:
+				out.append(tok)			
+		elif tok.is_bit_or:
+			if tokens.peek_one().is_bit_or:
+				tokens.one()
+				out.append(tok.new('is_log_or', True))
+			else:
+				out.append(tok)
+		elif tok.is_equal:
+			if tokens.peek_one().is_equal:
+				tokens.one()
+				out.append(tok.new('is_cmp_eq', True))
+			else:
+				out.append(tok)
 		elif tok.is_greater:
 			if tokens.peek_one().is_equal:
-				out.append(tok.new('is_eq_or_greater'))
+				tokens.one()
+				out.append(tok.new('is_eq_or_greater', True))
 			else:
 				out.append(tok)
 		elif tok.is_less:
 			if tokens.peek_one().is_equal:
-				out.append(tok.new('is_eq_or_less'))
+				tokens.one()
+				out.append(tok.new('is_eq_or_less', True))
+			else:
+				out.append(tok)
+		elif tok.is_negate:
+			if tokens.peek_one().is_equal:
+				tokens.one()
+				out.append(tok.new('is_not_eq', True))
 			else:
 				out.append(tok)
 		elif tok.is_para_open:
+			'''
+				This may be a sub-expression or the building
+				of a tuple. Once this major loop is exited the
+				expression will be looked at for the building
+				of a tuple since the AST of this expression
+				will be fully built at that point.
+			'''
 			subexp = []
 			d = 1
 			while not (tokens.peek_one().is_para_close and d == 1):
@@ -527,10 +646,17 @@ def tokenize_expression(exp):
 				if tmp.is_para_open:
 					d += 1
 				elif tmp.is_para_close:
+					if d == 1:
+						break
 					d -= 1
 				subexp.append(tmp)
 			tokens.one()
 
+			'''
+				This will detect if the expression is
+				the building of a tuple and create one
+				as such if needed.
+			'''
 			subexp = tokenize_expression(subexp)
 
 			ntok = tok.new('is_subexpression', {
@@ -539,6 +665,22 @@ def tokenize_expression(exp):
 			out.append(ntok)
 		else:
 			out.append(tok)
+
+	parts = []
+
+	for item in out:
+		if len(parts) < 1:
+			parts.append([])
+		if item.is_comma:
+			parts.append([])
+			continue
+		parts[-1].append(item)
+
+	if len(parts) > 1:
+		ntok = out[0].new('is_make_tuple', {
+			'args': parts,
+		})
+		return [ntok]
 	return out
 
 def tokenize_body(body):
@@ -547,6 +689,31 @@ def tokenize_body(body):
 
 		if, for, dec, assignment, as (casting)
 	"""
+
+	tokens = Reader(body)
+
+	out = []
+
+	while tokens.has_more():
+		tok = tokens.one()
+		if tok.is_sq_open:
+			'''
+				This has to be handled early so that it does not complicate
+				the detection of assignment statements. It is also handled
+				in tokenize expression since there can be indexes inside of
+				indexes.
+			'''
+			subexp = read_nested_tokens(tokens, 'is_sq_open', 'is_sq_close')
+
+			ntok = tok.new('is_index', {
+				'exp': tokenize_expression(subexp),
+			})
+			out.append(ntok)
+		else:
+			out.append(tok)
+
+	body = out
+
 	tokens = Reader(body)
 
 	out = []
@@ -607,10 +774,10 @@ def tokenize_body(body):
 			ntok = tok.new('is_stmt_if', {
 				'cond_true': tokenize_body(cond_true),
 				'cond_false': tokenize_body(cond_false),
-				'cond': exp,
+				'cond': tokenize_expression(exp),
 			})
 
-			out.append(ntok)
+			out.append(ntok)			
 		elif tok.is_para_open and tokens.has_more() and tokens.peek_one().is_name:
 			# This is likely a tuple which will preceed an assignment expression.
 
@@ -656,7 +823,10 @@ def tokenize_body(body):
 			exp = [tok]
 			while not tokens.peek_one().is_semi_colon:
 				exp.append(tokens.one())
+				if not tokens.has_more():
+					error_token(tok, 'Unexpected end of input when looking for semi-colon.')
 			tokens.one()
+
 			exp = tokenize_expression(exp)
 
 			ntok = tok.new('is_stmt_assignment', {
@@ -681,11 +851,15 @@ def tokenize_body(body):
 					represent this type of /dev/null output operation.
 			'''
 			out.append(ntok)
-		elif tok.is_name and tokens.peek_one().is_equal:
+		elif tok.is_name and (tokens.peek_one().is_equal or (tokens.peek_one().is_index and tokens.peek_next().is_equal)):
 			'''
 				The assignment statement.
 			'''
 			assign_to = tok.is_name
+			assign_ndx = None
+
+			if tokens.peek_one().is_index:
+				assign_ndx = tokens.one().exp
 
 			expression = []
 
@@ -698,6 +872,7 @@ def tokenize_body(body):
 			ntok = tok.new('is_stmt_assignment', True)
 			ntok.body = tokenize_expression(expression)
 			ntok.dst = assign_to
+			ntok.ndx = assign_ndx
 			out.append(ntok)
 		elif tok.is_name == 'dec':
 			'''
@@ -717,9 +892,24 @@ def tokenize_body(body):
 				tokens.one()
 				args = []
 				
-				while not tokens.peek_one().is_semi_colon:
+				'''
+					Stop at both a semi-colon and a equal sign. For the equal sign, the
+					expression will be split and turned into an assignment expression.
+				'''
+				while not tokens.peek_one().is_semi_colon and not tokens.peek_one().is_equal:
 					args.append(tokens.one())
-				tokens.one()
+				
+				# Check for equal sign. The 'is_equal' property means the
+				# token represents an equal sign. The attribute naming is
+				# a little ambigious with comparing to something which is
+				# incorrect below.
+				assign_exp = None
+				if tokens.one().is_equal:
+					assign_exp = []
+					while not tokens.peek_one().is_semi_colon:
+						tmp = tokens.one()
+						assign_exp.append(tmp)
+					tokens.one()
 
 				ntok = tok.new('is_stmt_dec', True)
 
@@ -799,8 +989,63 @@ def tokenize_body(body):
 				ntok.typename = info['typename']
 				ntok.generic_args = info['generic_args']
 				out.append(ntok)
+
+				if assign_exp is not None:
+					'''
+						Build tokens representing an assignment right after
+						the declaration. This should make processing easier
+						by being more generic. Preventing the next phase from
+						having to deal with complex declarations (includes an
+						assignment expression) or simple declarations (not including
+						an assignment expression).
+					'''
+					ntok = tok.new('is_stmt_assignment', {
+						'body': tokenize_expression(assign_exp),
+						'dst': varname,
+						'ndx': None,
+					})
+					out.append(ntok)
 			else:
 				error_token(tok, 'Expected semi-colon or colon after variable name when using dec keyword.')
+		elif tok.is_name == 'loop':
+			'''
+				Emile wrote some code using a loop without the parenthesis, but I guess
+				if we can handle both situations it would be nice. - kmcg
+
+				TODO: consider doing the same with the FOR loop
+			'''
+			def do_error():
+				error_token(tok, 'Expected curly brace after loop condition.')
+
+			cond = []
+			if tokens.peek_one().is_para_open:
+				while not tokens.peek_one().is_para_close:
+					cond.append(tokens.one())
+				tokens.one()
+			else:
+				while not tokens.peek_one().is_curly_open and tokens.has_more(do_error):
+					cond.append(tokens.one())
+
+			if not tokens.one().is_curly_open:
+				do_error()
+
+			body = []
+			d = 1
+			while True:
+				tmp = tokens.one()
+				if tmp.is_curly_open:
+					d += 1
+				if tmp.is_curly_close:
+					if d == 1:
+						break
+					d -= 1
+				body.append(tmp)
+
+			ntok = tok.new('is_stmt_loop', {
+				'cond': tokenize_expression(cond),
+				'body': tokenize_body(body),
+			})
+			out.append(ntok)
 		elif tok.is_name == 'for':
 			tok = tokens.one()
 			if not tok.is_para_open:

@@ -19,6 +19,10 @@ def main(argv):
 
 		ast = tokenizer.tokenizer(data)
 		print(json.dumps(ast))
+		'''
+			This makes easier debugging of the AST.
+		'''
+		#pprint.pprint(ast)
 
 if __name__ == '__main__':
 	main(sys.argv)

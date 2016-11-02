@@ -1,0 +1,66 @@
+/#
+    Please note that this is a draft, for testing the compiler,
+    It will be changed to be functional and usible at the end of the day
+    -Myvar
+#/
+
+scope Core;
+
+#all objects automaticaly inherits the object class
+type i8 
+{
+
+    #all objects must have a ToString Cast  
+    @public
+    @overide #overide bace class tostring
+    fn ToString() : str
+    {
+        return IntToString(this, 10);
+    }
+
+    @public
+    @overide  
+    fn ToString(int bace) : str
+    {
+        if (bace <= 1 || bace >= 17)
+        {
+            throw "Only bace 2 till 16 is suported";
+        }
+
+        return IntToString(this, bace);
+    }
+
+    #the internal method
+    @private
+    fn IntToString(int a, int radix) : string
+    {
+        dec chars : str = "0123456789ABCDEF";
+        dec astr: str = ""; 
+        dec i : i8 = 32;
+        dec isNegative : bool = (a < 0);
+        loop a <= 0
+        {
+            # I changed it from --i to the below in order
+            # to work through. Then going to come back and
+            # implement the decrement before.
+            astr[i - 1] = chars[-(a % radix)];
+            i = i - 1;
+            a = -(a / radix);
+        }
+
+        loop a != 0
+        {
+            astr[i - 1] = chars[a % radix];
+            i = i - 1;
+            a = a / radix;
+        }
+
+        if (isNegative)
+        {
+            astr[i - 1] = '-';
+            i = i - 1;
+        }
+
+        return astr;
+    }
+}

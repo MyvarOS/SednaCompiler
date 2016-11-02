@@ -1,0 +1,36 @@
+imports System
+imports Kernel
+
+scope MyvarOS
+
+@move
+@garbage
+@heap
+type Program
+{
+    @entry    
+    fn Main(arg0: int32, arg1: int16, arg2: Whoa<T>) 
+    {       
+        dec a: reference List<MyType<Sync<A, B>, Z>, M, N, Q, P>;
+        dec b: move int32;
+
+        b.member.submember = a;
+
+        b = 4 + 6 + a.call_something(b.grape + a.zeta, 4 + a.figure, 45 + 54 * 8 / 2 + b) * (9 * 3);
+
+        (apple, grape, peach) = something_that_produce_tuple();
+
+        if (a + b > 3) {
+        	k = k + 3;
+        	if (h > 3) {
+        		okhbiggerthan();
+        	}
+        } else {
+        	r = r + 2;
+        }
+
+        frog = (4, 3, happy_call(), b.g, 5 + 6);
+
+        return a + 4 - 6 * SomeType.AStaticMethod();
+    }
+}
